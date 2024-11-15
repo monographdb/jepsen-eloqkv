@@ -1,23 +1,25 @@
 (ns jepsen.redis.core
   "Top-level test runner, integration point for various workloads and nemeses."
-  (:require [clojure.tools.logging :refer [info warn]]
-            [clojure [pprint :refer [pprint]]
-                     [string :as str]]
-            [jepsen [cli :as cli]
-                    [checker :as checker]
-                    [control :as c]
-                    [generator :as gen]
-                    [tests :as tests]
-                    [util :as util :refer [parse-long]]]
-            [jepsen.os.debian :as debian]
-            [jepsen.redis [append :as append]
-                          [db     :as rdb]
-                          [nemesis :as nemesis]]))
+  (:require
+   [clojure [string :as str]]
+   [clojure.tools.logging :refer [info]]
+   [jepsen [cli :as cli]
+    [checker :as checker]
+    [control :as c]
+    [generator :as gen]
+    [tests :as tests]
+    [util :as util :refer [parse-long]]]
+   [jepsen.os.debian :as debian]
+   [jepsen.redis [append :as append]
+    [counter :as counter]
+    [db     :as rdb]
+    [nemesis :as nemesis]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:append  append/workload})
+  {:counter counter/workload
+   :append  append/workload})
 
 (def standard-workloads
   "The workload names we run for test-all by default."
@@ -25,7 +27,7 @@
 
 (def nemeses
   "Types of faults a nemesis can create."
-   #{:pause :kill :partition :clock :member :island :mystery})
+  #{:pause :kill :partition :clock :member :island :mystery})
 
 (def standard-nemeses
   "Combinations of nemeses for tests"
@@ -71,28 +73,27 @@
   (let [workload ((workloads (:workload opts)) opts)
         db        (rdb/redis-raft)
         nemesis   (nemesis/package
-                    {:db      db
-                     :nodes   (:nodes opts)
-                     :faults  (set (:nemesis opts))
-                     :partition {:targets [:primaries
-                                           :majority
-                                           :majorities-ring]}
-                     :pause     {:targets [:primaries :majority]}
-                     :kill      {:targets [:primaries :majority :all]}
-                     :interval  (:nemesis-interval opts)})
-        _ (info (pr-str nemesis))
-        ]
+                   {:db      db
+                    :nodes   (:nodes opts)
+                    :faults  (set (:nemesis opts))
+                    :partition {:targets [:primaries
+                                          :majority
+                                          :majorities-ring]}
+                    :pause     {:targets [:primaries :majority]}
+                    :kill      {:targets [:primaries :majority :all]}
+                    :interval  (:nemesis-interval opts)})
+        _ (info (pr-str nemesis))]
     (merge tests/noop-test
            opts
            workload
            {:checker    (checker/compose
-                          {:perf        (checker/perf
-                                          {:nemeses (:perf nemesis)})
-                           :clock       (checker/clock-plot)
-                           :crash       (crash-checker)
-                           :stats       (checker/stats)
-                           :exceptions  (checker/unhandled-exceptions)
-                           :workload    (:checker workload)})
+                         {:perf        (checker/perf
+                                        {:nemeses (:perf nemesis)})
+                          :clock       (checker/clock-plot)
+                          :crash       (crash-checker)
+                          :stats       (checker/stats)
+                          :exceptions  (checker/unhandled-exceptions)
+                          :workload    (:checker workload)})
             :db         db
             :generator  (->> (:generator workload)
                              (gen/stagger (/ (:rate opts)))
