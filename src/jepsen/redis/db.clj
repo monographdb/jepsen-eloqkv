@@ -1,6 +1,7 @@
 (ns jepsen.redis.db
   "Database automation"
   (:require [taoensso.carmine :as car :refer [wcar]]
+            [clojure.java.shell :refer [sh]]
             [clojure.java [io :as io]
              [shell :as shell]]
             [clojure [pprint :refer [pprint]]
@@ -344,21 +345,25 @@
       (c/su
        (info node "installing eloqkv")
 
-       (cu/start-daemon!
-        {:logfile logfile1
-         :pidfile pidfile
-         :chdir dir}
-        binary
-        "--config"
-        config)
+      ;;  (cu/start-daemon!
+      ;;   {:logfile logfile1
+      ;;    :pidfile pidfile
+      ;;    :chdir dir}
+      ;;   binary
+      ;;   "--config"
+      ;;   config)
 
        (Thread/sleep 10000)))
 
     (teardown! [_ test node]
       (info node "tearing down eloqkv")
-      (c/su
-       (cu/stop-daemon! binary pidfile)
-       (c/exec :rm :-rf data_dir)))
+      ;; (c/su
+      ;;  (cu/stop-daemon! binary pidfile)
+      ;;  (c/exec :rm :-rf data_dir)
+      ;;  (let [result (sh "bash" "shell/clean_cassandra.sh")]
+        ;;  (println "Output:" (:out result)) )
+      ;;  ))
+    )
 
 
     db/LogFiles
