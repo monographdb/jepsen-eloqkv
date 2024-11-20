@@ -38,7 +38,7 @@
    (open node {}))
   ([node opts]
    (let [spec (merge {:host       node
-                      :port       6379
+                      :port       6389
                       :timeout-ms 10000}
                      opts)
          seed-pool (conn/conn-pool :none)
@@ -58,44 +58,102 @@
   converting known exceptions to failed ops."
   [op idempotent & body]
   `(let [crash# (if (~idempotent (:f ~op)) :fail :info)]
-     (try+ ~@body
-           (catch [:prefix :err] e#
-             (condp re-find (.getMessage (:throwable ~'&throw-context))
-               ; These two would ordinarily be our fault, but are actually
-               ; caused by follower proxies mangling connection state.
-               #"ERR DISCARD without MULTI"
-               (assoc ~op :type crash#, :error :discard-without-multi)
+     (try ~@body
+          (catch clojure.lang.ExceptionInfo e#
+            (let [message# (.getMessage e#)
+                  message-type# (type message#)
+                  data# (.getData e#)]
+              (info "Message type: " message-type#)
+              (condp re-find message#
+                #"Transaction failed due to internal cc request is directed to a follower."
+                (assoc ~op :type :fail, :error [:eloqkv-internal-error message#])
 
-               #"ERR MULTI calls can not be nested"
-               (assoc ~op :type crash#, :error :nested-multi)
+                #"Failed to initialize the transaction."
+                (assoc ~op :type :fail, :error [:eloqkv-internal-error message#])
 
-               (throw+)))
-           (catch [:prefix :moved] e#
-             (assoc ~op :type :fail, :error :moved))
+                #"Transaction failed due to internal request timeout."
+                (assoc ~op :type :fail, :error [:eloqkv-internal-error message#])
 
-           (catch [:prefix :nocluster] e#
-             (assoc ~op :type :fail, :error :nocluster))
+                (do (info "unknown ExceptionInfo: " message#)
+                    (assoc ~op :type :info, :error message#)))))
 
-           (catch [:prefix :clusterdown] e#
-             (assoc ~op :type :fail, :error :clusterdown))
+          (catch java.net.SocketException e#
+            (assoc ~op :type crash#, :error [:socket (.getMessage e#)]))
+          (catch java.net.SocketTimeoutException e#
+            (assoc ~op :type crash#, :error [:socket-timeout (.getMessage e#)]))
+          (catch  java.lang.NumberFormatException e#
+            (assoc ~op :type crash#, :error [:number-format-exception (.getMessage e#)]))
 
-           (catch [:prefix :notleader] e#
-             (assoc ~op :type :fail, :error :notleader))
+          (catch Throwable t#
+            (let [error-message# (.getMessage t#)]
+              (.printStackTrace t#)
+              (info "Caught Throwable:" error-message# " type:" (type t#))
+              (assoc ~op :type :fail, :error error-message#))))))
 
-           (catch [:prefix :timeout] e#
-             (assoc ~op :type crash# :error :timeout))
 
-           (catch java.io.EOFException e#
-             (assoc ~op :type crash#, :error :eof))
+;; (defmacro with-exceptions
+;;   "Takes an operation, an idempotent :f set, and a body; evaluates body,
+;;   converting known exceptions to failed ops."
+;;   [op idempotent & body]
+;;   `(let [crash# (if (~idempotent (:f ~op)) :fail :info)]
+;;      (try+ ~@body
+;;            (catch [:prefix :err] e#
+;;              (condp re-find (.getMessage (:throwable ~'&throw-context))
+;;                ; These two would ordinarily be our fault, but are actually
+;;                ; caused by follower proxies mangling connection state.
+;;                #"ERR DISCARD without MULTI"
+;;                (assoc ~op :type crash#, :error :discard-without-multi)
 
-           (catch java.net.ConnectException e#
-             (assoc ~op :type :fail, :error :connection-refused))
+;;                #"ERR MULTI calls can not be nested"
+;;                (assoc ~op :type crash#, :error :nested-multi)
 
-           (catch java.net.SocketException e#
-             (assoc ~op :type crash#, :error [:socket (.getMessage e#)]))
+;;                (throw+)))
+;;            (catch [:prefix :moved] e#
+;;              (assoc ~op :type :fail, :error :moved))
 
-           (catch java.net.SocketTimeoutException e#
-             (assoc ~op :type crash#, :error :socket-timeout)))))
+;;            (catch [:prefix :nocluster] e#
+;;              (assoc ~op :type :fail, :error :nocluster))
+
+;;            (catch [:prefix :clusterdown] e#
+;;              (assoc ~op :type :fail, :error :clusterdown))
+
+;;            (catch [:prefix :notleader] e#
+;;              (assoc ~op :type :fail, :error :notleader))
+
+;;            (catch [:prefix :timeout] e#
+;;              (assoc ~op :type crash# :error :timeout))
+
+;;            (catch java.io.EOFException e#
+;;              (assoc ~op :type crash#, :error :eof))
+
+;;            (catch java.net.ConnectException e#
+;;              (assoc ~op :type :fail, :error :connection-refused))
+
+;;            (catch java.net.SocketException e#
+;;              (assoc ~op :type crash#, :error [:socket (.getMessage e#)]))
+
+;;            (catch java.net.SocketTimeoutException e#
+;;              (assoc ~op :type crash#, :error :socket-timeout))
+
+;;            (catch Exception e#
+;;              (println "exception: " (.getMessage e#))
+;;              (condp re-find (.getMessage e#)
+;;                #"Transaction failed" 
+;;                (do (info "catch exception:" (.getMessage e#)) 
+;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
+
+;;                #"Failed to initialize the transaction."
+;;                (do (info "catch exception:" (.getMessage e#))
+;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
+
+;;                #"Transaction failed due to internal request timeout."
+;;                (do (info "catch exception:" (.getMessage e#)) 
+;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
+
+;;                (do (info "unknown exception:" (.getMessage e#))
+;;                    (assoc ~op :type :fail, :error (.getMessage e#)))
+;;                ))
+;;            )))
 
 (defmacro delay-exceptions
   "Adds a short (n second) delay when an exception is thrown from body. Helpful
@@ -103,9 +161,9 @@
   cost of potentially missing the first moments of a server's life."
   [n & body]
   `(try ~@body
-       (catch Exception e#
-         (Thread/sleep (* ~n 1000))
-         (throw e#))))
+        (catch Exception e#
+          (Thread/sleep (* ~n 1000))
+          (throw e#))))
 
 (defn abort-txn!
   "Takes a connection and, if in a transaction, calls discard on it, resetting
@@ -116,14 +174,14 @@
   (when @(:in-txn? conn)
     (try+
       ;(info :multi-discarding)
-      (wcar conn (car/discard))
-      (catch [:prefix :err] e
+     (wcar conn (car/discard))
+     (catch [:prefix :err] e
         ;(info :abort-caught (.getMessage (:throwable &throw-context)))
-        (condp re-find (.getMessage (:throwable &throw-context))
+       (condp re-find (.getMessage (:throwable &throw-context))
           ; Don't care, we're being safe!
-          #"ERR DISCARD without MULTI" nil
+         #"ERR DISCARD without MULTI" nil
           ; Something else
-          (throw+))))
+         (throw+))))
     ;(info :multi-discarded)
     (reset! (:in-txn? conn) false))
   conn)
@@ -134,12 +192,12 @@
   [conn]
   (if (compare-and-set! (:in-txn? conn) false true)
     (do ;(info :multi-starting)
-        (wcar conn (car/multi))
+      (wcar conn (car/multi))
         ;(info :multi-started)
-        conn)
+      conn)
     (do ;(info "Completing discard of previous (likely aborted) transaction before new one.")
-        (abort-txn! conn)
-        (recur conn))))
+      (abort-txn! conn)
+      (recur conn))))
 
 (defmacro with-conn
   "Call before *any* use of a connection. Ensures that the connection is not in

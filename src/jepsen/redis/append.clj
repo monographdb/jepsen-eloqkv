@@ -26,6 +26,7 @@
 (defn parse-read
   "Turns reads of [:r :x ['1' '2'] into reads of [:r :x [1 2]]."
   [conn [f k v :as mop]]
+  (info "parse-read mop:" mop)
   (try
     (case f
       :r [f k (mapv parse-long v)]
@@ -61,6 +62,7 @@
                     (rc/with-txn conn)
                     ; And zip results back into the original txn
                     (mapv (fn [[f k v] r]
+                            (info "mapv" f k v r)
                             [f k (case f
                                    :r      r
                                    :append v)])
@@ -88,7 +90,7 @@
                     ; 3 keys, etc.
                     :key-count          (:key-count opts 12)
                     :min-txn-length     1
-                    :max-txn-length     (:max-txn-length opts 4)
+                    :max-txn-length     (:max-txn-length opts 1)
                     :max-writes-per-key (:max-writes-per-key opts 128)
                     :consistency-models [:strict-serializable]})
       (assoc :client (Client. nil))

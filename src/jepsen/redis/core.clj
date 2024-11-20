@@ -9,16 +9,19 @@
     [generator :as gen]
     [tests :as tests]
     [util :as util :refer [parse-long]]]
-   [jepsen.os.debian :as debian]
+   [jepsen.os.ubuntu :as ubuntu]
    [jepsen.redis [append :as append]
     [counter :as counter]
+    [register :as register]
     [db     :as rdb]
-    [nemesis :as nemesis]]))
+    [nemesis :as nemesis]]
+   ))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:counter counter/workload
+  {:register register/workload
+   :counter counter/workload
    :append  append/workload})
 
 (def standard-workloads
@@ -76,14 +79,17 @@
                    {:db      db
                     :nodes   (:nodes opts)
                     :faults  (set (:nemesis opts))
-                    :partition {:targets [:primaries
+                    :partition {:targets [
+                                          :one
+                                          ;; :primaries
                                           :majority
-                                          :majorities-ring]}
+                                          :majorities-ring
+                                          ]}
                     :pause     {:targets [:primaries :majority]}
                     :kill      {:targets [:primaries :majority :all]}
                     :interval  (:nemesis-interval opts)})
         _ (info (pr-str nemesis))]
-    (merge tests/noop-test
+   (let [test_opt (merge tests/noop-test
            opts
            workload
            {:checker    (checker/compose
@@ -99,14 +105,16 @@
                              (gen/stagger (/ (:rate opts)))
                              (gen/nemesis (:generator nemesis))
                              (gen/time-limit (:time-limit opts)))
-            :name       (str "redis " (:redis-version opts)
-                             " (raft " (:raft-version opts) ") "
-                             (when (:follower-proxy opts)
-                               "proxy ")
+            :name       (str "eloqkv "
                              (name (:workload opts)) " "
                              (str/join "," (map name (:nemesis opts))))
+            :concurrency 6
             :nemesis    (:nemesis nemesis)
-            :os         debian/os})))
+            :os         ubuntu/os})]
+            (info "test_opt:" test_opt)
+            test_opt
+
+            )))
 
 (def cli-opts
   "Options for test runners."

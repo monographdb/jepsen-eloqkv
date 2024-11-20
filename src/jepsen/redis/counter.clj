@@ -8,39 +8,64 @@
     [generator :as gen]
     [independent :as independent]
     [util :as util :refer [parse-long]]]
-   [jepsen.checker.timeline :as timeline]
    [jepsen.redis.client :as rc]
-            [knossos.model :as model :refer [inconsistent]]
+   [knossos.model :as model :refer [inconsistent]]
+   [jepsen.checker.timeline :as timeline]
    [slingshot.slingshot :refer [throw+]]
    [taoensso.carmine :as car :refer [wcar]])
-  (:import (knossos.model Model))
-  )
+  (:import
+   (knossos.model Model)))
 
-(defn r   [_ _] {:type :invoke, :f :read, :value [[:read "key" nil]]})
-(defn w   [_ _] {:type :invoke, :f :write, :value [[:write "key" (rand-int 5)]]})
-(defn incr [_ _] {:type :invoke, :f :incr, :value [[:incr "key" nil]]})
+(def key-range (vec (range 3)))
+(defn rand-val [] (rand-int 5))
+
+(defn r
+  "Read a random subset of keys."
+  [_ _]
+  (->> (util/random-nonempty-subset key-range)
+       (mapv (fn [k] [:read k nil]))
+       (array-map :type :invoke, :f :txn, :value)))
+
+(defn w [_ _]
+  "Write a random subset of keys."
+  (->> (util/random-nonempty-subset key-range)
+       (mapv (fn [k] [:write k (rand-val)]))
+       (array-map :type :invoke, :f :txn, :value)))
+
+(defn incr [_ _]
+  "Write a random subset of keys."
+  (->> (util/random-nonempty-subset key-range)
+       (mapv (fn [k] [:incr k nil]))
+       (array-map :type :invoke, :f :txn, :value)))
 
 (defn apply-mop!
   "Executes a micro-operation against a Carmine connection. This gets used in
   two different ways. Executed directly, it returns a completed mop. In a txn
   context, it's executed for SIDE effects, which must be reconstituted later."
   [conn [f k v :as mop]]
+  ;; (try 
+  (info "mop:" mop)
   (case f
     :read      [f k (wcar conn (car/get k))]
     :write (do (wcar conn (car/set k (str v)))
                mop)
     :incr      [f k (wcar conn (car/incr k))]))
 
+
+
 (defn parse-read
   "Turns reads of [:r :x ['1' '2'] into reads of [:r :x [1 2]]."
   [conn [f k v :as mop]]
-  (println "f:" f " k:" k " v:" v)
-  (println "type v:" (type v))
+  (info "f:" f ", type of f:" (type f) " k:" k ", type of k:" (type f) " v:" v ", type of v:" (type v))
+  ;; (println "type v:" (type v))
   (try
-    (case f
-      :read [f k (parse-long v)]
-      :write mop
-      :incr mop)
+    (let [result
+          (case f
+            :read [f k (if (nil? v) nil (parse-long v))]
+            :write mop
+            :incr mop)]
+      (info "parse result:" result)
+      result)
     (catch ClassCastException e
       (throw+ {:type        :unexpected-read-type
                :key         k
@@ -50,7 +75,7 @@
                ; log whatever happens from an EXEC here.
                ;:exec-result (wcar conn (car/exec))}))))
 
-(defrecord AtomicClient [conn]
+(defrecord Client [conn]
   client/Client
 
   (open! [this test node]
@@ -59,107 +84,96 @@
                            ; (info :conn c)
                            (assoc this :conn (rc/open node)))))
 
-  (setup! [_ test])
+  (setup! [_ test] (info " use client"))
 
 
   (invoke! [_ test op]
-    (println "value " (:value op) " count:" (count (:value op)))
-    (rc/with-exceptions op #{}
-      (rc/with-conn conn
-        (->> (if (< 1 (count (:value op)))
+    (let [value (second (:value op))]
+      (info "value " value " count:" (count value))
+      (rc/with-exceptions op #{:read}
+        (rc/with-conn conn
+          (->> (if (< 1 (count value))
                  ; We need a transaction
-               (->> (:value op)
+                 (->> value
                       ; Perform micro-ops for side effects
-                    (mapv (partial apply-mop! conn))
+                      (mapv (partial apply-mop! conn))
                       ; In a transaction
-                    (rc/with-txn conn)
+                      (rc/with-txn conn)
                       ; And zip results back into the original txn
-                    (mapv (fn [[f k v] record]
-                            [f k (case f
-                                   :read      record
-                                   :write v)])
-                          (:value op)))
+                      (mapv (fn [[f k v] record]
+                              (info "make result" f k v record)
+                              [f k (case f
+                                     :read      record
+                                     :write v
+                                     :incr record)])
+                            value))
 
                  ; Just execute the mop directly, without a txn
-               (->> (:value op)
-                    (mapv (partial apply-mop! conn))))
+                 (->> value
+                      (mapv (partial apply-mop! conn))))
 
                ; Parse integer reads
-             (mapv (partial parse-read conn))
+               (mapv (partial parse-read conn))
                ; Returning that completed txn as an OK op
-             (assoc op :type :ok, :value)))))
+               (assoc op :type :ok, :value)
+            ;;  (info )
+               )))))
 
   (teardown! [_ test])
 
   (close! [this test]
     (rc/close! conn)))
 
-(defrecord IntRegister [value]
+(defrecord MultiRegister []
   Model
-  (step [r op]
-    (condp = (:f op)
-      :write (IntRegister. (:value op))
-      :incr  (do ;;(println "Current value before increment:" value) ; 打印当前 value 的值 
-               (if (= (inc value) (:value op))
-                 (IntRegister. (:value op))
-                 (inconsistent (str "can't incr register from " value
-                                                  " to " (:value op)))))
-      :read  (if (or (nil? (:value op))
-                     (= value (:value op)))
-               r
-               (inconsistent (str "can't read " (:value op)
-                                                " from register " value)))))
-  Object
-  (toString [this] (pr-str value)))
+  (step [this op]
+    (assert (= (:f op) :txn))
+    ;; (info "op:" op)
+    (reduce (fn [state [f k v]]
+                  ;; (info "state: " state)
+              ;; (info ":f" f " k: " k " v:" v)
+              ; Apply this particular op
+              (case f
+                :read  (if (or (nil? v)
+                               (= v (get state k)))
+                         state
+                         (reduced
+                          (inconsistent
+                           (str (pr-str (get state k)) "≠" (pr-str v)))))
+                :incr  (cond
+                         (nil? v)  state
+                         (= (- v 1) (get state k 0)) (assoc state k v)
+                         :else (reduced (inconsistent
+                                         (str "incr inconsistent:" (pr-str (get state k 0)) "≠" (pr-str v)))))
 
+                :write (assoc state k v)))
 
-(defn int-register
-  "Given a map of account IDs to balances, models transfers between those
-  accounts."
-  ([] (IntRegister. nil))
-  ([value] (IntRegister. value)))
+            this
+            (:value op))))
 
-(defn my_test
-  "A partial test, including a generator, model, and checker. You'll need to
-  provide a client. Options:
-
-    :nodes            A set of nodes you're going to operate on. We only care
-                      about the count, so we can figure out how many workers
-                      to use per key.
-    :model            A model for checking. Default is (model/cas-register).
-    :per-key-limit    Maximum number of ops per key.
-    :process-limit    Maximum number of processes that can interact with a
-                      given key. Default 20."
-  [opts]
-  {:checker (independent/checker
-             (checker/compose
-              {:linearizable (checker/linearizable
-                              {:model (:model opts (model/cas-register))})
-               :timeline     (timeline/html)}))
-;;    :generator (let [n (count (:nodes opts))]
-;;                 (independent/concurrent-generator
-;;                  n
-;;                  (range)
-;;                  (fn [k]
-;;                    (cond->> (gen/reserve n r (gen/mix [w w w]))
-;;                          ; We randomize the limit a bit so that over time, keys
-;;                          ; become misaligned, which prevents us from lining up
-;;                          ; on Significant Event Boundaries.
-;;                      (:per-key-limit opts)
-;;                      (gen/limit (* (+ (rand 0.1) 0.9)
-;;                                    (:per-key-limit opts)))
-
-;;                      true
-;;                      (gen/process-limit (:process-limit opts 20))))))
-   :generator (->> (gen/mix [r w incr])
-                ;;    (gen/stagger 1)
-
-                   (gen/time-limit (:time-limit opts)))})
+(defn multi-register
+  "A register supporting read and write transactions over registers identified
+  by keys. Takes a map of initial keys to values. Supports a single :f for ops,
+  :txn, whose value is a transaction: a sequence of [f k v] tuples, where :f is
+  :read or :write, k is a key, and v is a value. Nil reads are always legal."
+  [values]
+  (map->MultiRegister values))
 
 
 (defn workload
   [opts]
-  (let [w (my_test (assoc opts :model (int-register 0)))]
-    (-> w
-        (assoc :client (AtomicClient. nil))
-        (update :generator (partial gen/stagger 1/10)))))
+  (let [n (count (:nodes opts))]
+    {:client (Client. nil)
+     :generator
+     (independent/concurrent-generator
+      (* 2 n)
+      (range)
+      (fn [k]
+        (->> (gen/reserve n r w incr)
+             (gen/stagger 1)
+             (gen/process-limit 20))))
+     :checker   (independent/checker
+                 (checker/compose
+                  {:timeline (timeline/html)
+                   :linear   (checker/linearizable
+                              {:model (multi-register {})})}))}))
