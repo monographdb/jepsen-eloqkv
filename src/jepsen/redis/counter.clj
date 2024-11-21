@@ -44,7 +44,7 @@
   context, it's executed for SIDE effects, which must be reconstituted later."
   [conn [f k v :as mop]]
   ;; (try 
-  (info "mop:" mop)
+  ;; (info "mop:" mop)
   (case f
     :read      [f k (wcar conn (car/get k))]
     :write (do (wcar conn (car/set k (str v)))
@@ -56,15 +56,14 @@
 (defn parse-read
   "Turns reads of [:r :x ['1' '2'] into reads of [:r :x [1 2]]."
   [conn [f k v :as mop]]
-  (info "f:" f ", type of f:" (type f) " k:" k ", type of k:" (type f) " v:" v ", type of v:" (type v))
-  ;; (println "type v:" (type v))
+  ;; (info "f:" f ", type of f:" (type f) " k:" k ", type of k:" (type f) " v:" v ", type of v:" (type v))
   (try
     (let [result
           (case f
             :read [f k (if (nil? v) nil (parse-long v))]
             :write mop
             :incr mop)]
-      (info "parse result:" result)
+      ;; (info "parse result:" result)
       result)
     (catch ClassCastException e
       (throw+ {:type        :unexpected-read-type
@@ -79,12 +78,18 @@
   client/Client
 
   (open! [this test node]
-    (rc/delay-exceptions 5
-                         (let [c (rc/open node)]
+    (info "Open connect on node " node)
+    (try
+      (rc/delay-exceptions 5
+                           (let [c (rc/open node)]
                            ; (info :conn c)
-                           (assoc this :conn (rc/open node)))))
+                             (assoc this :conn (rc/open node))))
+      (catch java.net.ConnectException e
+        (warn "Caught exception during open connection on node " node ". Error message: " (.getMessage e)))))
 
-  (setup! [_ test] (info " use client"))
+
+
+  (setup! [_ test] (info "Setup client"))
 
 
   (invoke! [_ test op]

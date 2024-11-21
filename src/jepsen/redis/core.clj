@@ -13,9 +13,8 @@
    [jepsen.redis [append :as append]
     [counter :as counter]
     [register :as register]
-    [db     :as rdb]
-    [nemesis :as nemesis]]
-   ))
+    [db     :as db]
+    [nemesis :as nemesis]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
@@ -65,7 +64,7 @@
   []
   (reify checker/Checker
     (check [this test history opts]
-      (if-let [crashes (rdb/logged-crashes test)]
+      (if-let [crashes (db/logged-crashes test)]
         {:valid?  false
          :crashes crashes}
         {:valid? true}))))
@@ -74,47 +73,50 @@
   "Builds up a Redis test from CLI options."
   [opts]
   (let [workload ((workloads (:workload opts)) opts)
-        db        (rdb/redis-raft)
+        db        (db/eloqkv)
         nemesis   (nemesis/package
                    {:db      db
                     :nodes   (:nodes opts)
                     :faults  (set (:nemesis opts))
-                    :partition {:targets [
-                                          :one
+                    :partition {:targets [:one
                                           ;; :primaries
                                           :majority
-                                          :majorities-ring
+                                          :majorities-ring]}
+                    :pause     {:targets [:one
+                                          ;; :primaries 
+                                          :majority
+                                          :all]}
+                    :kill      {:targets [:one
+                                          ;; :primaries
+                                          ;; :majority
+                                          ;; :all
                                           ]}
-                    :pause     {:targets [:primaries :majority]}
-                    :kill      {:targets [:primaries :majority :all]}
                     :interval  (:nemesis-interval opts)})
         _ (info (pr-str nemesis))]
-   (let [test_opt (merge tests/noop-test
-           opts
-           workload
-           {:checker    (checker/compose
-                         {:perf        (checker/perf
-                                        {:nemeses (:perf nemesis)})
-                          :clock       (checker/clock-plot)
-                          :crash       (crash-checker)
-                          :stats       (checker/stats)
-                          :exceptions  (checker/unhandled-exceptions)
-                          :workload    (:checker workload)})
-            :db         db
-            :generator  (->> (:generator workload)
-                             (gen/stagger (/ (:rate opts)))
-                             (gen/nemesis (:generator nemesis))
-                             (gen/time-limit (:time-limit opts)))
-            :name       (str "eloqkv "
-                             (name (:workload opts)) " "
-                             (str/join "," (map name (:nemesis opts))))
-            :concurrency 6
-            :nemesis    (:nemesis nemesis)
-            :os         ubuntu/os})]
-            (info "test_opt:" test_opt)
-            test_opt
-
-            )))
+    (let [test_opt (merge tests/noop-test
+                          opts
+                          workload
+                          {:checker    (checker/compose
+                                        {:perf        (checker/perf
+                                                       {:nemeses (:perf nemesis)})
+                                         :clock       (checker/clock-plot)
+                                         :crash       (crash-checker)
+                                         :stats       (checker/stats)
+                                         :exceptions  (checker/unhandled-exceptions)
+                                         :workload    (:checker workload)})
+                           :db         db
+                           :generator  (->> (:generator workload)
+                                            (gen/stagger (/ (:rate opts)))
+                                            (gen/nemesis (:generator nemesis))
+                                            (gen/time-limit (:time-limit opts)))
+                           :name       (str "eloqkv "
+                                            (name (:workload opts)) " "
+                                            (str/join "," (map name (:nemesis opts))))
+                           :concurrency 6
+                           :nemesis    (:nemesis nemesis)
+                           :os         ubuntu/os})]
+      (info "test_opt:" test_opt)
+      test_opt)))
 
 (def cli-opts
   "Options for test runners."
