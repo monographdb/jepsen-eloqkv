@@ -83,7 +83,11 @@
             (assoc ~op :type crash#, :error [:socket-timeout (.getMessage e#)]))
           (catch  java.lang.NumberFormatException e#
             (assoc ~op :type crash#, :error [:number-format-exception (.getMessage e#)]))
-
+          (catch  java.net.ConnectException e#
+            (assoc ~op :type crash#, :error [:net-connect-exception (.getMessage e#)]))
+                    (catch   java.io.EOFException e#
+            (assoc ~op :type crash#, :error [:io-eof-exception (.getMessage e#)]))
+         
           (catch Throwable t#
             (let [error-message# (.getMessage t#)]
               (.printStackTrace t#)

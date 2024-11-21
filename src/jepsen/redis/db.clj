@@ -1,7 +1,6 @@
 (ns jepsen.redis.db
   "Database automation"
   (:require [taoensso.carmine :as car :refer [wcar]]
-            [clojure.java.shell :refer [sh]]
             [clojure.java [io :as io]
              [shell :as shell]]
             [clojure [pprint :refer [pprint]]
@@ -22,28 +21,30 @@
   "A remote directory for us to clone projects and compile them."
   "/tmp/jepsen/build")
 
-(def dir
-  "The remote directory where we deploy redis to"
-  "/opt/redis")
+;; (def dir
+;;   "The remote directory where we deploy redis to"
+;;   "/opt/redis")
 
 (def build-file
   "A file we create to track the last built version; speeds up compilation."
   "jepsen-built-version")
 
-(def log-file       (str dir "/redis.log"))
-(def pid-file       (str dir "/redis.pid"))
-(def binary         "redis-server")
-(def cli-binary     "redis-cli")
-(def db-file        "redis.rdb")
-(def raft-log-file  "raftlog.db")
-(def config-file    "redis.conf")
+;; (def log-file       (str dir "/redis.log"))
+;; (def pid-file       (str dir "/redis.pid"))
+;; (def binary         "redis-server")
+;; (def cli-binary     "redis-cli")
+;; (def db-file        "redis.rdb")
+;; (def raft-log-file  "raftlog.db")
+;; (def config-file    "redis.conf")
 
-(def dir     "/home/eloq/liunyl-workspace/EloqKV")
-(def logfile (str dir "/data/LOG"))
-(def logfile1 (str dir "/raftis.log"))
-(def pidfile (str dir "/raftis.pid"))
+(def dir     "/home/eloq/eloqkv-cluster/EloqKV")
+(def log-file (str dir "/eloqkv_jepsen.log"))
+;; (def logfile1 (str dir "/raftis.log"))
+(def pid-file (str dir "/eloqkv.pid"))
 (def binary  (str dir "/bin/eloqkv"))
-(def config  (str dir "/conf/eloqkv.ini"))
+(def cli-binary   (str dir "/bin/eloqcli"))
+(def config-file  (str dir "/EloqKv-tx-6389.ini"))
+(def cluster-name "eloqkv-cluster")
 (def data_dir (str dir "/eloq_data"))
 
 
@@ -337,7 +338,7 @@
         (retry more)
         (throw e)))))
 
-(defn redis-raft
+(defn eloqkv
   "Raftis DB for a particular version."
   []
   (reify db/DB
@@ -363,12 +364,25 @@
       ;;  (let [result (sh "bash" "shell/clean_cassandra.sh")]
         ;;  (println "Output:" (:out result)) )
       ;;  ))
-    )
+      )
 
+    db/Process
+    (start! [_ test node]
+      (info "start:" node)
+      (shell/sh "bash" "-c"
+                (str "eloqctl start --nodes " node ":6389 " cluster-name)))
+
+    (kill! [_ test node]
+      (c/su
+       (cu/stop-daemon! binary pid-file)))
+
+    db/Pause
+    (pause!  [_ test node] (c/su (cu/grepkill! :stop binary)))
+    (resume! [_ test node] (c/su (cu/grepkill! :cont binary)))
 
     db/LogFiles
     (log-files [_ test node]
-      [logfile])))
+      [log-file])))
 
 (def crash-pattern
   "An egrep pattern we use to find crashes in the redis logs."
