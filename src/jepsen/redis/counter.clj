@@ -33,7 +33,7 @@
        (array-map :type :invoke, :f :txn, :value)))
 
 (defn incr [_ _]
-  "Write a random subset of keys."
+  "Incr a random subset of keys."
   (->> (util/random-nonempty-subset key-range)
        (mapv (fn [k] [:incr k nil]))
        (array-map :type :invoke, :f :txn, :value)))
@@ -47,8 +47,8 @@
   ;; (info "mop:" mop)
   (case f
     :read      [f k (wcar conn (car/get k))]
-    :write (do (wcar conn (car/set k (str v)))
-               mop)
+    :write     (do (wcar conn (car/set k (str v)))
+                   mop)
     :incr      [f k (wcar conn (car/incr k))]))
 
 
@@ -108,9 +108,9 @@
                       (mapv (fn [[f k v] record]
                               (info "make result" f k v record)
                               [f k (case f
-                                     :read      record
-                                     :write v
-                                     :incr record)])
+                                     :read   record
+                                     :write  v
+                                     :incr   record)])
                             value))
 
                  ; Just execute the mop directly, without a txn
@@ -165,18 +165,29 @@
   (map->MultiRegister values))
 
 
+(defn with-op-index
+  "Append :op-index integer to every operation emitted by the given generator.
+  Value starts at 1 and increments by 1 for every subsequent emitted operation."
+  [gen]
+  (let [ctr (atom 0)]
+    (gen/map (fn add-op-index [op]
+               (assoc op :op-index (swap! ctr inc)))
+             gen)))
+
 (defn workload
   [opts]
   (let [n (count (:nodes opts))]
     {:client (Client. nil)
      :generator
+     (with-op-index
      (independent/concurrent-generator
       (* 2 n)
       (range)
       (fn [k]
-        (->> (gen/reserve n r w incr)
+        (->> (gen/reserve n r w)
              (gen/stagger 1)
              (gen/process-limit 20))))
+     )
      :checker   (independent/checker
                  (checker/compose
                   {:timeline (timeline/html)

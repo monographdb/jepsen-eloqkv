@@ -74,6 +74,9 @@
                 #"Transaction failed due to internal request timeout."
                 (assoc ~op :type :fail, :error [:eloqkv-internal-error message#])
 
+                #"Eloqkv internal error during transaction."
+                (assoc ~op :type :fail, :error [:eloqkv-internal-error message#])
+
                 (do (info "unknown ExceptionInfo: " message#)
                     (assoc ~op :type :info, :error message#)))))
 
@@ -85,79 +88,14 @@
             (assoc ~op :type crash#, :error [:number-format-exception (.getMessage e#)]))
           (catch  java.net.ConnectException e#
             (assoc ~op :type crash#, :error [:net-connect-exception (.getMessage e#)]))
-                    (catch   java.io.EOFException e#
+          (catch   java.io.EOFException e#
             (assoc ~op :type crash#, :error [:io-eof-exception (.getMessage e#)]))
-         
+
           (catch Throwable t#
             (let [error-message# (.getMessage t#)]
               (.printStackTrace t#)
               (info "Caught Throwable:" error-message# " type:" (type t#))
               (assoc ~op :type :fail, :error error-message#))))))
-
-
-;; (defmacro with-exceptions
-;;   "Takes an operation, an idempotent :f set, and a body; evaluates body,
-;;   converting known exceptions to failed ops."
-;;   [op idempotent & body]
-;;   `(let [crash# (if (~idempotent (:f ~op)) :fail :info)]
-;;      (try+ ~@body
-;;            (catch [:prefix :err] e#
-;;              (condp re-find (.getMessage (:throwable ~'&throw-context))
-;;                ; These two would ordinarily be our fault, but are actually
-;;                ; caused by follower proxies mangling connection state.
-;;                #"ERR DISCARD without MULTI"
-;;                (assoc ~op :type crash#, :error :discard-without-multi)
-
-;;                #"ERR MULTI calls can not be nested"
-;;                (assoc ~op :type crash#, :error :nested-multi)
-
-;;                (throw+)))
-;;            (catch [:prefix :moved] e#
-;;              (assoc ~op :type :fail, :error :moved))
-
-;;            (catch [:prefix :nocluster] e#
-;;              (assoc ~op :type :fail, :error :nocluster))
-
-;;            (catch [:prefix :clusterdown] e#
-;;              (assoc ~op :type :fail, :error :clusterdown))
-
-;;            (catch [:prefix :notleader] e#
-;;              (assoc ~op :type :fail, :error :notleader))
-
-;;            (catch [:prefix :timeout] e#
-;;              (assoc ~op :type crash# :error :timeout))
-
-;;            (catch java.io.EOFException e#
-;;              (assoc ~op :type crash#, :error :eof))
-
-;;            (catch java.net.ConnectException e#
-;;              (assoc ~op :type :fail, :error :connection-refused))
-
-;;            (catch java.net.SocketException e#
-;;              (assoc ~op :type crash#, :error [:socket (.getMessage e#)]))
-
-;;            (catch java.net.SocketTimeoutException e#
-;;              (assoc ~op :type crash#, :error :socket-timeout))
-
-;;            (catch Exception e#
-;;              (println "exception: " (.getMessage e#))
-;;              (condp re-find (.getMessage e#)
-;;                #"Transaction failed" 
-;;                (do (info "catch exception:" (.getMessage e#)) 
-;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
-
-;;                #"Failed to initialize the transaction."
-;;                (do (info "catch exception:" (.getMessage e#))
-;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
-
-;;                #"Transaction failed due to internal request timeout."
-;;                (do (info "catch exception:" (.getMessage e#)) 
-;;                 (assoc ~op :type :fail, :error (.getMessage e#)))
-
-;;                (do (info "unknown exception:" (.getMessage e#))
-;;                    (assoc ~op :type :fail, :error (.getMessage e#)))
-;;                ))
-;;            )))
 
 (defmacro delay-exceptions
   "Adds a short (n second) delay when an exception is thrown from body. Helpful
@@ -218,9 +156,17 @@
         ~@body
         ;(info :multi-exec)
         (let [r# (wcar ~conn (car/exec))]
-          ;(info :multi-execed)
-          r#)
+          (info "tranaction result:" r#)
+          (if (nil? r#)
+            (throw (ex-info "Eloqkv internal error during transaction." {}))
+            r#)
+          )
+        
+        (catch clojure.lang.ExceptionInfo e#
+          (throw e#))
+        
         (catch Throwable t#
           ; This might fail, but we try to be polite.
+          (info "abort txn")
           (abort-txn! ~conn)
           (throw t#))))

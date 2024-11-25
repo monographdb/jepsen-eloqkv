@@ -369,8 +369,11 @@
     db/Process
     (start! [_ test node]
       (info "start:" node)
+            ;; resume the process before restart
+      (c/su (cu/grepkill! :cont binary))
       (shell/sh "bash" "-c"
-                (str "eloqctl start --nodes " node ":6389 " cluster-name)))
+                ;; (str "eloqctl start --nodes " node ":6389 " cluster-name)
+                (str "eloqctl start " cluster-name)))
 
     (kill! [_ test node]
       (c/su
