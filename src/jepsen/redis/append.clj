@@ -8,6 +8,7 @@
              [generator :as gen]
              [util :as util :refer [parse-long]]]
             [jepsen.checker.timeline :as timeline]
+            [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :as append]
             [jepsen.redis [client :as rc]]
             [taoensso.carmine :as car :refer [wcar]]
@@ -45,7 +46,7 @@
   (open! [this test node]
     (rc/delay-exceptions 5
                          (let [c (rc/open node)]
-                           ; (info :conn c)
+                           (info "connect to node:" node)
                            (assoc this :conn (rc/open node)))))
 
   (setup! [_ test])
@@ -92,6 +93,8 @@
                     :min-txn-length     1
                     :max-txn-length     (:max-txn-length opts 1)
                     :max-writes-per-key (:max-writes-per-key opts 128)
+                    :anomalies         [:G1 :G2]
+                    :additional-graphs [elle/realtime-graph]
                     :consistency-models [:strict-serializable]})
       (assoc :client (Client. nil))
 ;      (update :checker #(checker/compose {:workload %

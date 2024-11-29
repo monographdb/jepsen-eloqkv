@@ -358,6 +358,9 @@
 
     (teardown! [_ test node]
       (info node "tearing down eloqkv")
+      ;; (shell/sh "bash" "-c"
+      ;;      (str "eloqctl stop " cluster-name)))
+      
       ;; (c/su
       ;;  (cu/stop-daemon! binary pidfile)
       ;;  (c/exec :rm :-rf data_dir)

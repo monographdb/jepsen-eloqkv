@@ -13,13 +13,16 @@
    [jepsen.redis [append :as append]
     [counter :as counter]
     [register :as register]
+    [set :as set]
     [db     :as db]
     [nemesis :as nemesis]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:register register/workload
+  {
+  ;;  :set set/workload
+   :register register/workload
    :counter counter/workload
    :append  append/workload})
 
