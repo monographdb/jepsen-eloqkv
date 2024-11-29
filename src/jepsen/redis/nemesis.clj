@@ -2,14 +2,67 @@
   "Nemeses for Redis"
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
+            [jepsen.os.debian :as debian]
+            [jepsen.os.centos :as centos]
+            
+            
             [jepsen [db :as db]
                     [generator :as gen]
-                    [nemesis :as n]
+                    [nemesis :as nemesis]
                     [net :as net]
+                    [control :as c]
                     [util :as util]]
             [jepsen.nemesis [time :as nt]
                             [combined :as nc]]
+            [jepsen.nemesis.combined :as combined]
+            [jepsen.redis.clock :as eloqkv-clock-nemesis]
             [jepsen.redis [db :as rdb]]))
+
+(defn compile-tools!
+  []
+  (nt/compile-resource! "strobe-time.c" "strobe-time")
+  (nt/compile-resource! "bump-time.c" "bump-time"))
+
+(defn install!
+  "Uploads and compiles some C programs for messing with clocks."
+  []
+  (c/su
+   (try (compile-tools!)
+        (catch RuntimeException e
+          (try (debian/install [:build-essential])
+               (catch RuntimeException e
+                 (centos/install [:gcc])))
+          (compile-tools!)))))
+
+(defn clock-nemesis-wrapper
+  "Wrapper around standard Jepsen clock-nemesis which stops ntp service in addition to ntpd.
+  Won't be needed after https://github.com/jepsen-io/jepsen/pull/397"
+  []
+  (let [clock-nemesis (nt/clock-nemesis)]
+    (reify nemesis/Nemesis
+      (setup! [nem test]
+        (info "setup my nemesis in wrapper")
+              (c/with-test-nodes test (install!))
+              ; Try to stop ntpd service in case it is present and running.
+        (c/with-test-nodes test
+          (try (c/su (c/exec :service :ntp :stop))
+               (catch RuntimeException e))
+          (try (c/su (c/exec :service :ntpd :stop))
+               (catch RuntimeException e)))
+        (nt/reset-time! test)
+        ;; (c/with-test-nodes test (nt/install!))
+        ;; ; Try to stop ntpd service in case it is present and running.
+        ;; (c/with-test-nodes test
+        ;;   (try (c/su (c/exec :service :ntp :stop))
+        ;;        (catch RuntimeException e))
+        ;;   (try (c/su (c/exec :service :ntpd :stop))
+        ;;        (catch RuntimeException e)))
+        ;; (nt/reset-time! test)
+        nem)
+
+      (invoke! [_ test op] (nemesis/invoke! clock-nemesis test op))
+
+      (teardown! [_ test] (nemesis/teardown! clock-nemesis test)))))
 
 (defn member-nemesis
   "A nemesis for adding and removing nodes from the cluster. Options:
@@ -19,7 +72,7 @@
   Leave operations can either be a node name, or a map of {:remove node :using
   node}, in which case we ask a specific node to remove the other."
   [opts]
-  (reify n/Nemesis
+  (reify nemesis/Nemesis
     (setup! [this test] this)
 
     (invoke! [this test op]
@@ -34,7 +87,7 @@
 
     (teardown! [this test] this)
 
-    n/Reflection
+    nemesis/Reflection
     (fs [this] [:join :leave :hold])))
 
 (def min-cluster-size
@@ -98,7 +151,7 @@
                                   (concat
                                     [{:type  :info
                                       :f     :start-partition
-                                      :value (n/complete-grudge [[p] others])}]
+                                      :value (nemesis/complete-grudge [[p] others])}]
                                     ; Then, remove all other nodes
                                     (map (fn [n] {:type   :info
                                                   :f      :leave
@@ -182,10 +235,49 @@
                    :fs    [:leave]
                    :color "#ACA0E9"}}}))
 
+(def default-interval
+  "The default interval, in seconds, between nemesis operations."
+  10)
+
+(defn clock-wrapper-package
+  "A nemesis and generator package for modifying clocks. Options as for
+  nemesis-package."
+  [opts]
+  (when ((:faults opts) :clock)
+    (let [nemesis (nemesis/compose {{:reset-clock           :reset
+                               :check-clock-offsets   :check-offsets
+                               :strobe-clock          :strobe
+                               :bump-clock            :bump}
+                              (clock-nemesis-wrapper)})
+          gen     (->> (nt/clock-gen)
+                       (gen/f-map {:reset          :reset-clock
+                                   :check-offsets  :check-clock-offsets
+                                   :strobe         :strobe-clock
+                                   :bump           :bump-clock})
+                       (gen/delay (:interval opts default-interval)))]
+      {:generator         gen
+       :final-generator   (gen/once {:type :info, :f :reset-clock})
+       :nemesis           nemesis
+       :perf              #{{:name  "clock"
+                             :start #{:bump-clock}
+                             :stop  #{:reset-clock}
+                             :fs    #{:strobe-clock}
+                             :color "#A0E9E3"}}})))
+
+(defn eloqv-nemesis-packages
+  "Just like nemesis-package, but returns a collection of packages, rather than
+  the combined package, so you can manipulate it further before composition."
+  [opts]
+  (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
+        opts     (assoc opts :faults faults)]
+    (remove nil? [(combined/partition-package opts)
+                  (eloqkv-clock-nemesis/clock-nemesis-package opts)
+                  (combined/db-package opts)])))
+
 (defn package-for
   "Builds a combined package for the given options."
   [opts]
-  (->> (nc/nemesis-packages opts)
+  (->> (eloqv-nemesis-packages opts)
        (concat [(member-package opts)])
        (remove nil?)
        nc/compose-packages))
@@ -198,7 +290,7 @@
     :faults     The set of faults. A special fault, :island, yields islanding
                 faults."
   [opts]
-  (info opts)
+  (info "package opts:" opts)
   ; An island fault requires both membership and partition packages, and
   ; mystery faults need members and kills...
   (let [nemesis-opts (cond (some #{:island} (:faults opts))

@@ -37,6 +37,7 @@
   ([node]
    (open node {}))
   ([node opts]
+   (info "open connection")
    (let [spec (merge {:host       node
                       :port       6389
                       :timeout-ms 10000}
@@ -49,8 +50,9 @@
       :spec spec})))
 
 (defn close!
-  "Closes a connection to a node."
-  [^java.io.Closeable conn]
+  "Closes a connection to a node." 
+  [^java.io.Closeable conn] 
+  (info "close connection")
   (.close (:pool conn)))
 
 (defmacro with-exceptions
@@ -104,8 +106,15 @@
   [n & body]
   `(try ~@body
         (catch Exception e#
+          (try
           (Thread/sleep (* ~n 1000))
-          (throw e#))))
+             (catch InterruptedException interruped-error#
+             (Thread/interrupted)  
+             (warn "Sleep was interrupted!" interruped-error#)
+             )
+          )  
+          ;; (throw e#)
+               )))
 
 (defn abort-txn!
   "Takes a connection and, if in a transaction, calls discard on it, resetting
@@ -167,6 +176,7 @@
         
         (catch Throwable t#
           ; This might fail, but we try to be polite.
-          (info "abort txn")
+          (let [error-message# (.getMessage t#)]
+          (info "abort txn, error message:" error-message#))
           (abort-txn! ~conn)
           (throw t#))))
