@@ -21,7 +21,7 @@
   "A map of workload names to functions that can take opts and construct
   workloads."
   {
-  ;;  :set set/workload
+   :set set/workload
    :register register/workload
    :counter counter/workload
    :append  append/workload})
