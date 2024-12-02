@@ -360,7 +360,7 @@
       (info node "tearing down eloqkv")
       ;; (shell/sh "bash" "-c"
       ;;      (str "eloqctl stop " cluster-name)))
-      
+
       ;; (c/su
       ;;  (cu/stop-daemon! binary pidfile)
       ;;  (c/exec :rm :-rf data_dir)
@@ -368,6 +368,7 @@
         ;;  (println "Output:" (:out result)) )
       ;;  ))
       )
+
 
     db/Process
     (start! [_ test node]
