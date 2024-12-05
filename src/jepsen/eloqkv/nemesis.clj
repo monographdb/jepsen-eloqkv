@@ -1,22 +1,20 @@
-(ns jepsen.redis.nemesis
+(ns jepsen.eloqkv.nemesis
   "Nemeses for Redis"
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
-            
-            
             [jepsen [db :as db]
-                    [generator :as gen]
-                    [nemesis :as nemesis]
-                    [net :as net]
-                    [control :as c]
-                    [util :as util]]
+             [generator :as gen]
+             [nemesis :as nemesis]
+             [net :as net]
+             [control :as c]
+             [util :as util]]
             [jepsen.nemesis [time :as nt]
-                            [combined :as nc]]
+             [combined :as nc]]
             [jepsen.nemesis.combined :as combined]
-            [jepsen.redis.clock :as eloqkv-clock-nemesis]
-            [jepsen.redis [db :as rdb]]))
+            [jepsen.eloqkv [db :as rdb]
+             [clock :as eloqkv-clock-nemesis]]))
 
 (defn compile-tools!
   []
@@ -42,7 +40,7 @@
     (reify nemesis/Nemesis
       (setup! [nem test]
         (info "setup my nemesis in wrapper")
-              (c/with-test-nodes test (install!))
+        (c/with-test-nodes test (install!))
               ; Try to stop ntpd service in case it is present and running.
         (c/with-test-nodes test
           (try (c/su (c/exec :service :ntp :stop))
@@ -77,8 +75,8 @@
 
     (invoke! [this test op]
       (info "Current membership\n" (with-out-str
-                                 (pprint (rdb/get-meta-members (:db opts)))
-                                 (pprint (rdb/node-state test))))
+                                     (pprint (rdb/get-meta-members (:db opts)))
+                                     (pprint (rdb/node-state test))))
       (assoc op :value
              (case (:f op)
                :hold   nil
@@ -100,18 +98,18 @@
   (let [members (set (rdb/members db test))
         addable (remove members (:nodes test))]
     (cond ; We can add someone
-          (and (seq addable) (< (rand) 0.5))
-          {:type :info, :f :join, :value (rand-nth (vec addable))}
+      (and (seq addable) (< (rand) 0.5))
+      {:type :info, :f :join, :value (rand-nth (vec addable))}
 
           ; We can remove someone
-          (< min-cluster-size (count members))
-          {:type :info, :f :leave, :value (rand-nth (vec members))}
+      (< min-cluster-size (count members))
+      {:type :info, :f :leave, :value (rand-nth (vec members))}
 
           ; Huh, no options at all.
-          true
-          {:type :info, :f :hold, :value {:type :can't-change
-                                          :members members
-                                          :nodes (:nodes test)}})))
+      true
+      {:type :info, :f :hold, :value {:type :can't-change
+                                      :members members
+                                      :nodes (:nodes test)}})))
 
 (defn member-generator
   "Generates join and leave operations. Options:
@@ -136,32 +134,32 @@
     (->> (reify gen/Generator
            (op [this test process]
              (or (first
-                   (swap! queue
-                          (fn [q]
-                            (if (seq q)
+                  (swap! queue
+                         (fn [q]
+                           (if (seq q)
                               ; Advance
-                              (next q)
+                             (next q)
                               ; Empty, refill. We pick a primary and generate
                               ; a queue of ops for it.
-                              (when-let [primaries (seq (db/primaries db test))]
-                                (let [p (rand-nth primaries)
-                                      others (remove #{p} (:nodes test))]
-                                  (info "New island target is" p)
+                             (when-let [primaries (seq (db/primaries db test))]
+                               (let [p (rand-nth primaries)
+                                     others (remove #{p} (:nodes test))]
+                                 (info "New island target is" p)
                                   ; First, partition
-                                  (concat
-                                    [{:type  :info
-                                      :f     :start-partition
-                                      :value (nemesis/complete-grudge [[p] others])}]
+                                 (concat
+                                  [{:type  :info
+                                    :f     :start-partition
+                                    :value (nemesis/complete-grudge [[p] others])}]
                                     ; Then, remove all other nodes
-                                    (map (fn [n] {:type   :info
-                                                  :f      :leave
-                                                  :value  {:remove  n
-                                                           :using   p}})
-                                         others))))))))
+                                  (map (fn [n] {:type   :info
+                                                :f      :leave
+                                                :value  {:remove  n
+                                                         :using   p}})
+                                       others))))))))
                  ; Go again
                  (Thread/sleep 1000)
                  (recur test process))))
-           (gen/delay (:interval opts)))))
+         (gen/delay (:interval opts)))))
 
 (defn random-sublist
   "Randomly drops elements from the given collection."
@@ -245,10 +243,10 @@
   [opts]
   (when ((:faults opts) :clock)
     (let [nemesis (nemesis/compose {{:reset-clock           :reset
-                               :check-clock-offsets   :check-offsets
-                               :strobe-clock          :strobe
-                               :bump-clock            :bump}
-                              (clock-nemesis-wrapper)})
+                                     :check-clock-offsets   :check-offsets
+                                     :strobe-clock          :strobe
+                                     :bump-clock            :bump}
+                                    (clock-nemesis-wrapper)})
           gen     (->> (nt/clock-gen)
                        (gen/f-map {:reset          :reset-clock
                                    :check-offsets  :check-clock-offsets
@@ -315,7 +313,7 @@
         gen (case faults
               #{:island}  (island-generator opts)
               #{:mystery} (mystery-generator opts)
-                          (:generator gen-package))
+              (:generator gen-package))
         ; Should do a final gen here too but I'm lazy and we don't use final
         ; gens yet.
         ]

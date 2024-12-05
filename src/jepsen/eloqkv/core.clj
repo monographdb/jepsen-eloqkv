@@ -1,4 +1,4 @@
-(ns jepsen.redis.core
+(ns jepsen.eloqkv.core
   "Top-level test runner, integration point for various workloads and nemeses."
   (:require
    [clojure [string :as str]]
@@ -10,9 +10,8 @@
     [tests :as tests]
     [util :as util :refer [parse-long]]]
    [jepsen.os.ubuntu :as ubuntu]
-   [jepsen.redis [append :as append]
+   [jepsen.eloqkv [append :as append]
     [counter :as counter]
-    [register :as register]
     [set :as set]
     [db     :as db]
     [nemesis :as nemesis]]))
@@ -22,7 +21,6 @@
   workloads."
   {
    :set set/workload
-   :register register/workload
    :counter counter/workload
    :append  append/workload})
 
@@ -76,23 +74,23 @@
   "Builds up a Redis test from CLI options."
   [opts]
   (let [workload ((workloads (:workload opts)) opts)
-        db        (db/eloqkv)
+        db        (db/eloqkv  (:nodes opts))
         nemesis   (nemesis/package
                    {:db      db
                     :nodes   (:nodes opts)
                     :faults  (set (:nemesis opts))
                     :partition {:targets [:one
-                                          ;; :primaries
+                                          :primaries
                                           :majority
                                           :majorities-ring]}
                     :pause     {:targets [:one
-                                          ;; :primaries 
+                                          :primaries 
                                           :majority
                                           :all]}
                     :kill      {:targets [:one
-                                          ;; :primaries
-                                          ;; :majority
-                                          ;; :all
+                                          :primaries
+                                          :majority
+                                          :all
                                           ]}
                     :interval  (:nemesis-interval opts)})
         _ (info (pr-str nemesis))]
@@ -184,6 +182,9 @@
    [nil "--redis-repo URL" "Where we clone redis from?"
     :default "https://github.com/redis/redis"]
 
+   [nil "--standby-mode" "Enable EloqKV standby mode"
+    :default false]
+   
    ["-w" "--workload NAME" "What workload should we run?"
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]])

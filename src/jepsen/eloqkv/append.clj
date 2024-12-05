@@ -1,4 +1,4 @@
-(ns jepsen.redis.append
+(ns jepsen.eloqkv.append
   "Tests for transactional list append."
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.pprint :refer [pprint]]
@@ -10,7 +10,7 @@
             [jepsen.checker.timeline :as timeline]
             [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :as append]
-            [jepsen.redis [client :as rc]]
+            [jepsen.eloqkv [client :as rc]]
             [taoensso.carmine :as car :refer [wcar]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -44,16 +44,20 @@
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
+    (try
     (rc/delay-exceptions 5
                          (let [c (rc/open node)]
                            (info "connect to node:" node)
-                           (assoc this :conn (rc/open node)))))
+                           (assoc this :conn (rc/open node))))
+      (catch java.net.ConnectException e
+        (warn "Caught exception during open connection on node " node ". Error message: " (.getMessage e)))
+      ))
 
   (setup! [_ test])
 
   (invoke! [_ test op]
     (rc/with-exceptions op #{}
-      (rc/with-conn conn
+      (rc/with-conn test conn
         (->> (if (< 1 (count (:value op)))
                ; We need a transaction
                (->> (:value op)

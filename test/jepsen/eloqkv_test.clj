@@ -1,4 +1,4 @@
-(ns jepsen.redis-test
+(ns jepsen.eloqkv-test
   (:require [clojure.test :refer :all]
             [jepsen.redis :refer :all]))
 

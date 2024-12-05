@@ -1,4 +1,4 @@
-(ns jepsen.redis.clock
+(ns jepsen.eloqkv.clock
   "Functions for messing with time and clocks."
   (:require [clojure.tools.logging :refer [info]]
             [jepsen.os.debian :as debian]

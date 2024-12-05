@@ -1,4 +1,4 @@
-(ns jepsen.redis.counter
+(ns jepsen.eloqkv.counter
   "Single atomic register test"
   (:refer-clojure :exclude [test read])
   (:require
@@ -8,7 +8,7 @@
     [generator :as gen]
     [independent :as independent]
     [util :as util :refer [parse-long]]]
-   [jepsen.redis.client :as rc]
+   [jepsen.eloqkv.client :as rc]
    [knossos.model :as model :refer [inconsistent]]
    [jepsen.checker.timeline :as timeline]
    [slingshot.slingshot :refer [throw+]]
@@ -96,7 +96,7 @@
     (let [value (second (:value op))]
       (info "value " value " count:" (count value))
       (rc/with-exceptions op #{:read}
-        (rc/with-conn conn
+        (rc/with-conn test conn
           (->> (if (< 1 (count value))
                  ; We need a transaction
                  (->> value

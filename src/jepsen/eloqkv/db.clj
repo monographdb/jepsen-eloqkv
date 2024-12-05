@@ -1,4 +1,4 @@
-(ns jepsen.redis.db
+(ns jepsen.eloqkv.db
   "Database automation"
   (:require [taoensso.carmine :as car :refer [wcar]]
             [clojure.java [io :as io]
@@ -13,9 +13,10 @@
              [util :as util :refer [parse-long]]]
             [jepsen.control [net :as cn]
              [util :as cu]]
-            [jepsen.redis [client :as rc]]
+            [jepsen.eloqkv [client :as client]]
             [jepsen.os.debian :as debian]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]]
+            [jepsen.eloqkv.client :as client]))
 
 (def build-dir
   "A remote directory for us to clone projects and compile them."
@@ -29,13 +30,6 @@
   "A file we create to track the last built version; speeds up compilation."
   "jepsen-built-version")
 
-;; (def log-file       (str dir "/redis.log"))
-;; (def pid-file       (str dir "/redis.pid"))
-;; (def binary         "redis-server")
-;; (def cli-binary     "redis-cli")
-;; (def db-file        "redis.rdb")
-;; (def raft-log-file  "raftlog.db")
-;; (def config-file    "redis.conf")
 
 (def dir     "/home/eloq/eloqkv-cluster/EloqKV")
 (def log-file (str dir "/eloqkv_jepsen.log"))
@@ -338,26 +332,28 @@
         (retry more)
         (throw e)))))
 
+
+
 (defn eloqkv
   "Raftis DB for a particular version."
-  []
+  [nodes]
   (reify db/DB
     (setup! [_ test node]
-      (c/su
-       (info node "installing eloqkv")
+      (info node "installing eloqkv")
+      (when (= node (first nodes))
+        (info "Perform eloqctl on node " node)
+        (info (shell/sh "bash" "-c" "eloqctl stop -f eloqkv-cluster"))
+        (info (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))
+        (if (:standby-mode test)
+          (info "setup eloqkv-cluster. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv_standby.yaml"))
+          (info "setup eloqkv-cluster with standby mode. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv.yaml"))))
+      (Thread/sleep 10000))
 
-      ;;  (cu/start-daemon!
-      ;;   {:logfile logfile1
-      ;;    :pidfile pidfile
-      ;;    :chdir dir}
-      ;;   binary
-      ;;   "--config"
-      ;;   config)
 
-       (Thread/sleep 10000)))
 
     (teardown! [_ test node]
       (info node "tearing down eloqkv")
+      (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))
       ;; (shell/sh "bash" "-c"
       ;;      (str "eloqctl stop " cluster-name)))
 
@@ -367,8 +363,15 @@
       ;;  (let [result (sh "bash" "shell/clean_cassandra.sh")]
         ;;  (println "Output:" (:out result)) )
       ;;  ))
-      )
 
+
+    db/Primary
+    (setup-primary! [_ test node])
+
+    (primaries      [_ test]
+      (let [primary-nodes (remove nil? (map client/is-primary nodes))]
+        (info "primary nodes:" primary-nodes)
+        primary-nodes))
 
     db/Process
     (start! [_ test node]
