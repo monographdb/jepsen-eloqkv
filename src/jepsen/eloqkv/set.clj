@@ -1,4 +1,4 @@
-(ns jepsen.redis.set
+(ns jepsen.eloqkv.set
   "Adds elements to sets and reads them back"
   (:refer-clojure :exclude [test read])
   (:require [clojure.tools.logging :refer [info warn]]
@@ -6,7 +6,7 @@
              [client :as client]
              [generator :as gen]
              [util :as util :refer [parse-long]]]
-            [jepsen.redis [client :as rc]]
+            [jepsen.eloqkv [client :as rc]]
             [taoensso.carmine :as car :refer [wcar]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -15,16 +15,16 @@
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
-    (rc/delay-exceptions 5
-                         (let [c (rc/open node)]
-                           (assoc this :conn (rc/open node)))))
+       (rc/delay-exceptions 5
+                            (let [c (rc/open node)]
+                              (info "connect to node:" node)
+                              (assoc this :conn (rc/open node)))))
 
   (setup! [_ test])
 
   (invoke! [_ test op]
     (rc/with-exceptions op #{:read}
-      (rc/with-conn conn
-
+      (rc/with-conn test conn
         (info "op:" op)
         (case (:f op)
           :add    (let [elem (str (:value op))]
@@ -55,5 +55,6 @@
    :generator (->> (gen/reserve (/ (:concurrency opts) 2)
                                 (adds)
                                 (reads))
+
                    (gen/stagger 1/2))
    :checker   (checker/set-full)})
