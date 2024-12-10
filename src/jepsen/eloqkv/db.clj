@@ -340,20 +340,29 @@
   (reify db/DB
     (setup! [_ test node]
       (info node "installing eloqkv")
-      (when (= node (first nodes))
-        (info "Perform eloqctl on node " node)
-        (info (shell/sh "bash" "-c" "eloqctl stop -f eloqkv-cluster"))
-        (info (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))
-        (if (:standby-mode test)
-          (info "setup eloqkv-cluster. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv_standby.yaml"))
-          (info "setup eloqkv-cluster with standby mode. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv.yaml"))))
+      (info "auto start:" (:auto-start test))
+      (when (:auto-start test)
+        (info "Automatically start eloqkv cluster.")
+        (when (= node (first nodes))
+          (info "Perform eloqctl on node " node)
+          ;; (info (shell/sh "bash" "-c" "eloqctl stop -f eloqkv-cluster"))
+          ;; (info (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))
+          (if (:standby-mode test)
+            (info "Setup eloqkv-cluster. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv_standby.yaml"))
+            (info "Setup eloqkv-cluster with standby mode. " (shell/sh "bash" "-c" "eloqctl launch -s resources/jepsen_eloqkv.yaml")))))
+
       (Thread/sleep 10000))
 
 
 
     (teardown! [_ test node]
-      (info node "tearing down eloqkv")
-      (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))
+      (info node "Tearing down eloqkv")
+      (when (:auto-start test)
+        (info "Automatically tear down eloqkv cluster.")
+        (info (shell/sh "bash" "-c" "eloqctl stop -f eloqkv-cluster"))
+        (info (shell/sh "bash" "-c" "eloqctl remove eloqkv-cluster"))))
+    
+      ;;)
       ;; (shell/sh "bash" "-c"
       ;;      (str "eloqctl stop " cluster-name)))
 

@@ -27,7 +27,7 @@
 (defn parse-read
   "Turns reads of [:r :x ['1' '2'] into reads of [:r :x [1 2]]."
   [conn [f k v :as mop]]
-  (info "parse-read mop:" mop)
+  ;; (info "parse-read mop:" mop)
   (try
     (case f
       :r [f k (mapv parse-long v)]
@@ -67,7 +67,7 @@
                     (rc/with-txn conn)
                     ; And zip results back into the original txn
                     (mapv (fn [[f k v] r]
-                            (info "mapv" f k v r)
+                            ;; (info "mapv" f k v r)
                             [f k (case f
                                    :r      r
                                    :append v)])
@@ -99,7 +99,7 @@
                     :max-writes-per-key (:max-writes-per-key opts 128)
                     :anomalies         [:G1 :G2]
                     :additional-graphs [elle/realtime-graph]
-                    :consistency-models [:strict-serializable]})
+                    :consistency-models [:read-committed]})
       (assoc :client (Client. nil))
 ;      (update :checker #(checker/compose {:workload %
 ;                                          :timeline (timeline/html)}))

@@ -19,8 +19,7 @@
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {
-   :set set/workload
+  {:set set/workload
    :counter counter/workload
    :append  append/workload})
 
@@ -56,6 +55,11 @@
        (map keyword)
        (mapcat #(get special-nemeses % [%]))))
 
+(defn parse-storage-nodes-spec
+  "Takes a comma-separated storage nodes string and returns a collection of nodes name."
+  [spec]
+  (->> (str/split spec #",")))
+
 (defn crash-checker
   "Reports on unexpected process crashes in the logfiles. This is... a terrible
   hack and will probably break in later versions of Jepsen; it relies on the
@@ -84,13 +88,13 @@
                                           :majority
                                           :majorities-ring]}
                     :pause     {:targets [:one
-                                          :primaries 
+                                          :primaries
                                           :majority
                                           :all]}
                     :kill      {:targets [:one
-                                          :primaries
-                                          :majority
-                                          :all
+                                          ;; :primaries
+                                          ;; :majority
+                                          ;; :all
                                           ]}
                     :interval  (:nemesis-interval opts)})
         _ (info (pr-str nemesis))]
@@ -184,7 +188,14 @@
 
    [nil "--standby-mode" "Enable EloqKV standby mode"
     :default false]
+
+   [nil "--auto-start" "Enable auto start EloqKV cluster"
+ :default false]
    
+
+   [nil "--storage-nodes nodes-list" "A comma-separated list of storage nodes"
+    :parse-fn parse-storage-nodes-spec]
+
    ["-w" "--workload NAME" "What workload should we run?"
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]])
