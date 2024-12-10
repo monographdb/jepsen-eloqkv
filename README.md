@@ -33,32 +33,17 @@ GitHub, and the GitHub public SSH key in `~/.ssh/known_hosts`---see below.
 ## Usage
 
 To get started, try
-
+```bash
+lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 380  --nemesis partition,kill   --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1 --auto-start
 ```
-lein run test-all
-```
 
-To test a particular GIT SHA of Redis or Redis-Raft, pass `--version` or
-`--raft-version`, respectively. You may also want to specify a particular
-username and what DB nodes you'd like to use, and provide a custom
-`--time-limit` for each test. To run several iterations of each test, use
-`--test-count`. A thorough test run might look like:
 
-```
-lein run test-all --username admin --nodes-file ~/nodes --raft-version 73ad833 --time-limit 600 --test-count 10
+Manually test flushdb issue
+```bash
+bash scripts/run_and_check.bash 
 ```
 
 To focus on a particular set of faults, use `--nemesis`
-
-```
-lein run test-all --nemesis partition,kill
-```
-
-To see all options, try
-
-```
-lein run test-all --help
-```
 
 ## FAQ
 

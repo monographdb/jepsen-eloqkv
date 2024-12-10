@@ -199,7 +199,7 @@
         ~@body
         ;(info :multi-exec)
         (let [r# (wcar ~conn (car/exec))]
-          (info "tranaction result:" r#)
+          ;; (info "tranaction result:" r#)
           (if (nil? r#)
             (throw (ex-info "Eloqkv internal error during transaction." {}))
             r#))

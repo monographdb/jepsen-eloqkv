@@ -15,4 +15,7 @@ pom.xml.asc
 
 .lsp
 .clj-kondo/
-shell/
+
+scripts/__pycache__/
+error_log
+*.log
