@@ -45,47 +45,54 @@
   client/Client
   (open! [this test node]
     (try
-    (rc/delay-exceptions 5
-                         (let [c (rc/open node)]
-                           (info "connect to node:" node)
-                           (assoc this :conn (rc/open node))))
+      (info "internal node: " (:internal-nodes test))
+      (if (some #(= % node) (:internal-nodes test))
+        (assoc this :conn nil)
+        (rc/delay-exceptions 5
+                             (let [c (rc/open node)]
+                               (info "connect to node:" node)
+                               (assoc this :conn (rc/open node)))))
       (catch java.net.ConnectException e
-        (warn "Caught exception during open connection on node " node ". Error message: " (.getMessage e)))
-      ))
+        (warn "Caught exception during open connection on node " node ". Error message: " (.getMessage e)))))
 
   (setup! [_ test])
 
   (invoke! [_ test op]
-    (rc/with-exceptions op #{}
-      (rc/with-conn test conn
-        (->> (if (< 1 (count (:value op)))
+    (if (nil? conn)
+      (assoc op :type :fail, :error [:connect-error "Connection failed. This may be a storage or log service node."])
+      (rc/with-exceptions op #{}
+        (rc/with-conn test conn
+          (->> (if (< 1 (count (:value op)))
                ; We need a transaction
-               (->> (:value op)
+                 (->> (:value op)
                     ; Perform micro-ops for side effects
-                    (mapv (partial apply-mop! conn))
+                      (mapv (partial apply-mop! conn))
                     ; In a transaction
-                    (rc/with-txn conn)
+                      (rc/with-txn conn)
                     ; And zip results back into the original txn
-                    (mapv (fn [[f k v] r]
+                      (mapv (fn [[f k v] r]
                             ;; (info "mapv" f k v r)
-                            [f k (case f
-                                   :r      r
-                                   :append v)])
-                          (:value op)))
+                              [f k (case f
+                                     :r      r
+                                     :append v)])
+                            (:value op)))
 
                ; Just execute the mop directly, without a txn
-               (->> (:value op)
-                    (mapv (partial apply-mop! conn))))
+                 (->> (:value op)
+                      (mapv (partial apply-mop! conn))))
 
              ; Parse integer reads
-             (mapv (partial parse-read conn))
+               (mapv (partial parse-read conn))
              ; Returning that completed txn as an OK op
-             (assoc op :type :ok, :value)))))
+               (assoc op :type :ok, :value))))))
 
   (teardown! [_ test])
 
   (close! [this test]
-    (rc/close! conn)))
+    (info "nil conn" (nil? conn))
+    (if (nil? conn)
+      nil
+      (rc/close! conn))))
 
 (defn workload
   "A list append workload."
@@ -99,7 +106,7 @@
                     :max-writes-per-key (:max-writes-per-key opts 128)
                     :anomalies         [:G1 :G2]
                     :additional-graphs [elle/realtime-graph]
-                    :consistency-models [:read-committed]})
+                    :consistency-models [:repeatable-read]})
       (assoc :client (Client. nil))
 ;      (update :checker #(checker/compose {:workload %
 ;                                          :timeline (timeline/html)}))

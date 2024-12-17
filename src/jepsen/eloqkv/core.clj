@@ -55,8 +55,8 @@
        (map keyword)
        (mapcat #(get special-nemeses % [%]))))
 
-(defn parse-storage-nodes-spec
-  "Takes a comma-separated storage nodes string and returns a collection of nodes name."
+(defn parse-internal-nodes-spec
+  "Takes a comma-separated string and returns a collection of nodes name."
   [spec]
   (->> (str/split spec #",")))
 
@@ -190,11 +190,10 @@
     :default false]
 
    [nil "--auto-start" "Enable auto start EloqKV cluster"
- :default false]
-   
+    :default false]
 
-   [nil "--storage-nodes nodes-list" "A comma-separated list of storage nodes"
-    :parse-fn parse-storage-nodes-spec]
+   [nil "--internal-nodes nodes-list" "A comma-separated list of internal nodes which provide log service and storage service"
+    :parse-fn parse-internal-nodes-spec]
 
    ["-w" "--workload NAME" "What workload should we run?"
     :parse-fn keyword

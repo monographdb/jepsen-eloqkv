@@ -13,7 +13,7 @@ deployment:
     # client_port: 6389
   log_service:
     nodes:
-      - host: 192.168.122.35
+      - host: 192.168.122.24
         port: 9000
         data_dir:
           - "/home/${USER}/eloqkv-cluster/wal_eloqkv"

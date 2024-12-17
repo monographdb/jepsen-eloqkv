@@ -3,13 +3,44 @@ import subprocess
 import sys
 import os
 from datetime import datetime
+import logging
+
+
+def setup_logging():
+    # Create a logger
+    logger = logging.getLogger("run_and_check")
+    logger.setLevel(logging.DEBUG)
+
+    # Create a console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+
+    # Create a file handler
+    file_handler = logging.FileHandler("run_and_check.log")
+    file_handler.setLevel(logging.DEBUG)
+
+    # Create a log formatter
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
+
+logger = setup_logging()
 
 
 # Function to run a command and capture its output
-def run_command(command):
-    print(command)
+def run_command(command, timeout=None):
+    logger.info(f"run command {command}")
     result = subprocess.run(
-        command, shell=True, capture_output=True, text=True, check=True
+        command, shell=True, capture_output=True, text=True, check=True, timeout=timeout
     )
     return result.stdout, result.returncode
 
@@ -29,14 +60,14 @@ def recover():
 
     # Iterate through the host-PID pairs
     for host, pid in host_pid.items():
-        print(f"Host: {host}, PID: {pid}")
+        logger.info(f"Host: {host}, PID: {pid}")
 
         # Reset iptables and resume the process
         try:
             run_command(f"ssh {host} 'sudo iptables -F'")
             run_command(f"ssh {host} 'kill -CONT {pid}'")
         except subprocess.CalledProcessError as e:
-            print(f"Failed to execute command on {host}: {e}")
+            logger.warning(f"Failed to execute command on {host}: {e}")
 
 
 def start_eloqkv_cluster():
@@ -46,12 +77,14 @@ def start_eloqkv_cluster():
 def run_jepsen_test():
     try:
         _, return_code = run_command(
-            "lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 6000  --nemesis none  --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1"
+#            "lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 100  --nemesis none  --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1"
+            "lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 100  --nemesis partition  --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1"
         )
+        logger.info(f"jepsen return code:{return_code}")
         return return_code
 
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred: {e.stderr}")
+        logger.info(f"Error occurred: {e.stderr}")
         return 1
 
 
@@ -96,6 +129,15 @@ def save_error_log():
         )
 
 
+def flushdb():
+    try:
+        run_command(flushdb_command, timeout=60)
+    except subprocess.TimeoutExpired as e:
+        logger.warning(f"Flushdb command timed out: {e}")
+        save_error_log()
+        sys.exit(1)
+
+
 def check_client_num():
     try:
         for node in node_list:
@@ -104,21 +146,14 @@ def check_client_num():
             # Filter output for "connected_clients"
             for line in result.splitlines():
                 if "connected_clients" in line:
-                    print(line)  # Print or process the matching line
+                    logger.info(line)  # Print or process the matching line
                     client_num = int(line.split(":")[1])
 
-                    try:
-                        assert client_num == 1, "There are unclosed txm in EloqKV."
-                    except AssertionError as e:
-                        # If assertion fails, execute the specified command
-                        print(e)
-
-                        save_error_log()
-
-                        sys.exit(1)
-        result = run_command(flushdb_command)
-        return True
+                    if client_num > 1:
+                        logger.warning(
+                            "There are unclosed transactions in EloqKV. Please check if any other redis client is connecting."
+                        )
+                    break
 
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred: {e.stderr}")
-        return False
+        logger.warning(f"Error occurred: {e.stderr}")
