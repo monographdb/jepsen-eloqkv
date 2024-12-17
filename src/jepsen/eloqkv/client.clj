@@ -50,10 +50,14 @@
       :spec spec})))
 
 (defn close!
-  "Closes a connection to a node."
+  "Closes a connection to a node, safely handling nil values."
   [^java.io.Closeable conn]
-  (info "close connection")
-  (.close (:pool conn)))
+  (when conn 
+    (info "close connection")
+    (try
+      (info (.close (:pool conn)))
+      (catch Exception e
+        (warn e "Failed to close connection")))))
 
 (defmacro with-exceptions
   "Takes an operation, an idempotent :f set, and a body; evaluates body,
