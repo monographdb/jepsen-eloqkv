@@ -4,7 +4,14 @@ import sys
 import os
 from datetime import datetime
 import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
+import os
 
+# Load environment variables from the .env file
+load_dotenv()
 
 def setup_logging():
     # Create a logger
@@ -76,15 +83,16 @@ def start_eloqkv_cluster():
 
 def run_jepsen_test():
     try:
-        _, return_code = run_command(
-#            "lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 100  --nemesis none  --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1"
-            "lein run test-all --node compute-6 --node store-1 --node store-2 --username eloq --password eloq --time-limit 100  --nemesis partition  --workload append  --nemesis-interval 20 --max-writes-per-key 16 --max-txn-length 4 --test-count 1"
-        )
+        with open("scripts/jepsen_cmd.sh", "r") as file:
+            content = file.read()
+            logger.info(f"jepsen command: {content}")
+
+        _, return_code = run_command("bash scripts/jepsen_cmd.sh")
         logger.info(f"jepsen return code:{return_code}")
         return return_code
 
     except subprocess.CalledProcessError as e:
-        logger.info(f"Error occurred: {e.stderr}")
+        logger.warning(f"Error occurred: {e.stderr}")
         return 1
 
 
@@ -94,7 +102,7 @@ node_list = ["store-1", "store-2", "compute-6"]
 rsync_command = "rsync -azL '{source_dir}' '{destination_dir}'"
 rsync_remote_command = "rsync -azL -e ssh eloq@{node}:{source_dir} {destination_dir}"
 flushdb_command = redis_command.format(node=node_list[0], command="flushdb")
-
+rsync_super_server_command="rsync -azL -e ssh error_log eloq@192.168.1.59:~/"
 
 def save_error_log():
     jepsen_source_dir = run_command("readlink -f store/current")[0].strip()
@@ -127,6 +135,9 @@ def save_error_log():
                 destination_dir=os.path.join(node_destination_dir, "std-out-6389"),
             )
         )
+    run_command(rsync_super_server_command)
+    remote_root_dir = f"~/{root_dir}"
+    send_email(f"Detect failures related to Jepsen test or Eloqkv crash. Please refer eloq@192.168.1.59:{remote_root_dir} for more details.")
 
 
 def flushdb():
@@ -136,6 +147,9 @@ def flushdb():
         logger.warning(f"Flushdb command timed out: {e}")
         save_error_log()
         sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Error occurred: {e.stderr}")
+        return 1
 
 
 def check_client_num():
@@ -157,3 +171,88 @@ def check_client_num():
 
     except subprocess.CalledProcessError as e:
         logger.warning(f"Error occurred: {e.stderr}")
+
+
+def check_stdout_log():
+    root_dir = "tmp_stdout"
+    os.makedirs(root_dir, exist_ok=True)
+
+    for node in node_list:
+        node_dir =os.path.join(root_dir, node)
+        os.makedirs(node_dir, exist_ok=True)
+        stdout_file = os.path.join(node_dir, "std-out-6389")
+        run_command(
+            rsync_remote_command.format(
+                node=node,
+                source_dir="~/eloqkv-cluster/EloqKV/logs/std-out-6389",
+                destination_dir=stdout_file,
+            )
+        )
+        if not check_log_for_errors(stdout_file):
+            return False
+    return True
+
+
+def check_log_for_errors(log_file):
+
+    # Open the log file
+    try:
+        with open(log_file, "r") as f:
+            lines = f.readlines()[-50:]
+    except FileNotFoundError:
+        logger.warning(f"Log file {log_file} not found.")
+        return False
+    except Exception as e:
+        logger.warning(f"Error reading log file: {e}")
+        return False
+
+    # Define the list of error keywords to search for
+    error_keywords = [
+        # "Assertion",
+        "assert",
+        "asan",
+        "AddressSanitizer",
+        "Shadow byte",
+        "core dumped",
+        "Segmentation fault",
+    ]
+
+    # Check the log content for any of the defined error keywords
+    for line in lines:
+        for keyword in error_keywords:
+            if keyword.lower() in line.lower():  # Case-insensitive search
+                logger.error(f"Found error in log: {line.strip()}")
+                return False  # Return after finding the first matching error
+
+    logger.info("No errors found in the last 50 lines of the log.")
+    return True
+
+
+
+
+def send_email(content):
+    logger.info("Send email start.")
+    smtp_server = "smtp.qq.com" 
+    smtp_port = 465  
+    sender_email = os.getenv("SENDER_EMAIL")
+    receiver_email = os.getenv("RECEIVER_EMAIL")
+    password = os.getenv("PASSWORD")
+    logger.info(f"sender: {sender_email}")
+
+    # create email
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = "Jepsen test fail!"
+
+    # content
+    # body = "This is a test email sent from Python using QQ Mail SMTP server."
+    msg.attach(MIMEText(content, 'plain'))
+
+    try:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            server.login(sender_email, password) 
+            server.sendmail(sender_email, receiver_email, msg.as_string()) 
+            logger.info("Email sent successfully.")
+    except Exception as e:
+        logger.warning(f"Error: {e}")

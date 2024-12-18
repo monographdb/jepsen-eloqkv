@@ -1,0 +1,29 @@
+# flushdb test
+lein run test-all \
+    --node compute-6 \
+    --node store-1 \
+    --node store-2 \
+    --username eloq \
+    --password eloq \
+    --time-limit 60 \
+    --nemesis none \
+    --workload append \
+    --nemesis-interval 20 \
+    --max-writes-per-key 16 \
+    --max-txn-length 4 \
+    --test-count 1
+
+# append test
+lein run test-all \
+    --node compute-6 \
+    --node store-1 \
+    --node store-2 \
+    --username eloq \
+    --password eloq \
+    --time-limit 600 \
+    --nemesis partition,kill,pause \
+    --workload append \
+    --nemesis-interval 20 \
+    --max-writes-per-key 16 \
+    --max-txn-length 4 \
+    --test-count 1
