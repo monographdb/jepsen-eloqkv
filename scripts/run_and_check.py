@@ -5,12 +5,16 @@ from util import (
     run_jepsen_test,
     check_client_num,
     flushdb,
+    check_stdout_log,
 )
 
 for i in range(1, 100):
     recover()
     start_eloqkv_cluster()
     flushdb()
-    if run_jepsen_test() != 0:
+    if (not check_stdout_log()) or (run_jepsen_test() != 0):
         save_error_log()
+
     check_client_num()
+    if not check_stdout_log():
+        save_error_log()
