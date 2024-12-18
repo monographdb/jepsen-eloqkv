@@ -103,7 +103,7 @@
                     :key-count          (:key-count opts 12)
                     :min-txn-length     1
                     :max-txn-length     (:max-txn-length opts 1)
-                    :max-writes-per-key (:max-writes-per-key opts 128)
+                    :max-writes-per-key (:max-writes-per-key opts 16)
                     :anomalies         [:G1 :G2]
                     :additional-graphs [elle/realtime-graph]
                     :consistency-models [:repeatable-read]})
