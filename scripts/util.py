@@ -13,6 +13,7 @@ import os
 # Load environment variables from the .env file
 load_dotenv()
 
+
 def setup_logging():
     # Create a logger
     logger = logging.getLogger("run_and_check")
@@ -99,10 +100,12 @@ def run_jepsen_test():
 # Define the command and arguments
 redis_command = "redis-cli -h {node} -p 6389 {command}"
 node_list = ["store-1", "store-2", "compute-6"]
+log_node = "compute-5"
 rsync_command = "rsync -azL '{source_dir}' '{destination_dir}'"
 rsync_remote_command = "rsync -azL -e ssh eloq@{node}:{source_dir} {destination_dir}"
 flushdb_command = redis_command.format(node=node_list[0], command="flushdb")
-rsync_super_server_command="rsync -azL -e ssh error_log eloq@192.168.1.59:~/"
+rsync_super_server_command = "rsync -azL -e ssh error_log eloq@192.168.1.59:~/"
+
 
 def save_error_log():
     jepsen_source_dir = run_command("readlink -f store/current")[0].strip()
@@ -117,7 +120,6 @@ def save_error_log():
             source_dir=jepsen_source_dir + "/", destination_dir=jepsen_destination_dir
         )
     )
-
     for node in node_list:
         node_destination_dir = os.path.join(root_dir, node)
         os.makedirs(node_destination_dir, exist_ok=True)
@@ -136,8 +138,16 @@ def save_error_log():
             )
         )
     run_command(rsync_super_server_command)
+    run_command(
+        rsync_command.format(
+            source_dir="/home/eloq/eloqkv-cluster/LogServer/logs/g0n0/log-service.log.INFO",
+            destination_dir=root_dir,
+        )
+    )
     remote_root_dir = f"~/{root_dir}"
-    send_email(f"Detect failures related to Jepsen test or Eloqkv crash. Please refer eloq@192.168.1.59:{remote_root_dir} for more details.")
+    send_email(
+        f"Detect failures related to Jepsen test or Eloqkv crash. Please refer eloq@192.168.1.59:{remote_root_dir} for more details."
+    )
 
 
 def flushdb():
@@ -178,7 +188,7 @@ def check_stdout_log():
     os.makedirs(root_dir, exist_ok=True)
 
     for node in node_list:
-        node_dir =os.path.join(root_dir, node)
+        node_dir = os.path.join(root_dir, node)
         os.makedirs(node_dir, exist_ok=True)
         stdout_file = os.path.join(node_dir, "std-out-6389")
         run_command(
@@ -228,31 +238,29 @@ def check_log_for_errors(log_file):
     return True
 
 
-
-
 def send_email(content):
     logger.info("Send email start.")
-    smtp_server = "smtp.qq.com" 
-    smtp_port = 465  
+    smtp_server = "smtp.qq.com"
+    smtp_port = 465
     sender_email = os.getenv("SENDER_EMAIL")
-    receiver_email = os.getenv("RECEIVER_EMAIL")
+    receiver_email = os.getenv("RECEIVER_EMAIL").split(",")
     password = os.getenv("PASSWORD")
     logger.info(f"sender: {sender_email}")
 
     # create email
     msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = "Jepsen test fail!"
+    msg["From"] = sender_email
+    msg["To"] = ", ".join(receiver_email)
+    msg["Subject"] = "Jepsen test fail!"
 
     # content
     # body = "This is a test email sent from Python using QQ Mail SMTP server."
-    msg.attach(MIMEText(content, 'plain'))
+    msg.attach(MIMEText(content, "plain"))
 
     try:
         with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
-            server.login(sender_email, password) 
-            server.sendmail(sender_email, receiver_email, msg.as_string()) 
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
             logger.info("Email sent successfully.")
     except Exception as e:
         logger.warning(f"Error: {e}")
