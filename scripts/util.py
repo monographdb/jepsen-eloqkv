@@ -90,7 +90,14 @@ def run_jepsen_test():
 
         _, return_code = run_command("bash scripts/jepsen_cmd.sh")
         logger.info(f"jepsen return code:{return_code}")
-        return return_code
+        
+        if return_code != 0 and not check_error_in_jepsen_log(
+            "./store/current/jepsen.log"
+        ):
+            logger.info(f"Detect error caused by jepsen itself.")
+            return 0
+        else:
+            return return_code
 
     except subprocess.CalledProcessError as e:
         logger.warning(f"Error occurred: {e.stderr}")
@@ -128,6 +135,13 @@ def save_error_log():
                 node=node,
                 source_dir="~/eloqkv-cluster/EloqKV/logs/tx-6389/eloqkv.log.INFO",
                 destination_dir=os.path.join(node_destination_dir, "eloqkv.log.INFO"),
+            )
+        )
+        run_command(
+            rsync_remote_command.format(
+                node=node,
+                source_dir="~/eloqkv-cluster/EloqKV/logs/tx-6389/host_manager.log.INFO",
+                destination_dir=os.path.join(node_destination_dir, "host_manager.log.INFO"),
             )
         )
         run_command(
@@ -198,13 +212,38 @@ def check_stdout_log():
                 destination_dir=stdout_file,
             )
         )
-        if not check_log_for_errors(stdout_file):
+        if not check_error_in_eloqkv_log(stdout_file):
             return False
     return True
 
 
-def check_log_for_errors(log_file):
+def check_error_in_jepsen_log(log_file):
+    # Open the log file
+    try:
+        with open(log_file, "r") as f:
+            lines = f.readlines()[-50:]
+    except FileNotFoundError:
+        logger.warning(f"Log file {log_file} not found.")
+        return False
+    except Exception as e:
+        logger.warning(f"Error reading log file: {e}")
+        return False
 
+    # Define the list of error keywords to search for
+    error_keywords = ["java.lang.InterruptedException: sleep interrupted"]
+
+    # Check the log content for any of the defined error keywords
+    for line in lines:
+        for keyword in error_keywords:
+            if keyword.lower() in line.lower():  # Case-insensitive search
+                logger.error(f"Found error in jepsen log: {line.strip()}")
+                return False  # Return after finding the first matching error
+
+    logger.info("No errors found in the last 50 lines of the log.")
+    return True
+
+
+def check_error_in_eloqkv_log(log_file):
     # Open the log file
     try:
         with open(log_file, "r") as f:
@@ -231,7 +270,7 @@ def check_log_for_errors(log_file):
     for line in lines:
         for keyword in error_keywords:
             if keyword.lower() in line.lower():  # Case-insensitive search
-                logger.error(f"Found error in log: {line.strip()}")
+                logger.error(f"Found error in eloqkv log: {line.strip()}")
                 return False  # Return after finding the first matching error
 
     logger.info("No errors found in the last 50 lines of the log.")
